@@ -1,0 +1,70 @@
+#!/usr/bin/env ruby
+
+# Usage: ./download <chrome extension id>
+
+require 'fileutils'
+require 'net/https'
+require 'tmpdir'
+require 'zip'
+
+def unzip_file(file, destination_dir)
+  Zip::File.open(file) do |zip_file|
+    zip_file.each do |entry|
+      destination_file = File.join(destination_dir, entry.name)
+      FileUtils.mkdir_p(File.dirname(destination_file))
+      entry.extract(destination_file)
+
+      # Can also read into memory
+      # content = entry.get_input_stream.read
+    end
+  end
+
+  destination_dir
+rescue StandardError => ex
+  puts "  Got error unzipping #{file}"
+end
+
+def download_chrome_extension(id)
+  uri = URI('https://clients2.google.com/service/update2/crx')
+  uri.query = URI.encode_www_form(
+    'response' => 'redirect',
+    'os' => 'mac',
+    'arch' => 'x64',
+    'os_arch' => 'x86_64',
+    'nacl_arch' => 'x86-64',
+    'prod' => 'chromecrx',
+    'prodchannel' => '',
+    'prodversion' => '72.0.3626.81',
+    'lang' => 'en-US',
+    'acceptformat' => 'crx2,crx3',
+    'x' => 'id=' + id + '&installsource=ondemand&uc',
+    'authuser' => 1
+  )
+
+  response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
+    http.request(Net::HTTP::Get.new(uri))
+  end
+
+  unless response['location']
+    puts '  Failed to download!'
+    puts "  Status: #{response.code}"
+    puts "  #{response.to_hash}"
+    puts "  #{response.body}"
+    return
+  end
+  location = URI(response['location'])
+
+  download_dir = Dir.mktmpdir
+  filename = File.basename(location.path)
+
+  full_path = File.join(download_dir, filename)
+  IO.write(full_path, Net::HTTP.get(location))
+  unzip_file(full_path, download_dir)
+end
+
+def main(args)
+  destination_dir = download_chrome_extension(args[0])
+  puts "Downloaded to #{destination_dir}" if destination_dir
+end
+
+main(ARGV) if __FILE__ == $0
